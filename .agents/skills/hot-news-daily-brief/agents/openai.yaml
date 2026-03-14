@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hot News Daily Brief"
+  short_description: "Run two-stage hot-news pipeline for offline-safe daily digests"
+  default_prompt: "Use local inbox news candidate files to generate a bilingual daily digest: Top 5 first, then [时政], [金融], [科技-AI], [科技-其他], with why-hot logic and source URLs."

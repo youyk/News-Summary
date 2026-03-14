@@ -1,0 +1,21 @@
+# Local credential files (never commit)
+/scripts/gmail.env
+/.env
+/.env.*
+
+# Keep examples in repo
+!/.env.example
+/scripts/*.env.local
+
+# OAuth/token artifacts
+/*token*.json
+/*oauth*.json
+
+# Runtime logs
+/Report/*.log
+
+# Runtime generated reports and fetched data
+/Report/*.md
+/Report/*.html
+/data/inbox/news_candidates_*.json
+/data/inbox/manual/*.json
