@@ -1,8 +1,12 @@
 # Use: crontab -e
 # Timezone note: this example assumes local machine timezone = Asia/Shanghai.
+# Optional Stage A source credentials can be placed in:
+# /Users/yongkang/projects/skills/News-Summary/scripts/news_sources.env
 # Before Stage C, prepare /Users/yongkang/projects/skills/News-Summary/scripts/gmail.env
 # and set NEWS_DIGEST_TO plus Gmail OAuth variables. This file is gitignored.
 # NEWS_DIGEST_MAIL_CONTENT_MODE supports: plain | multipart | html-only.
+# Stage C validates digest quality by default (English min words + mandatory source-health section).
+# If Google API requires proxy from cron environment, set HTTPS_PROXY/HTTP_PROXY in gmail.env.
 
 # Stage A (online): collect candidates at 06:30 every day
 30 6 * * * /bin/zsh /Users/yongkang/projects/skills/News-Summary/scripts/stage_a_collect.sh >> /Users/yongkang/projects/skills/News-Summary/Report/stage_a_collect.log 2>&1

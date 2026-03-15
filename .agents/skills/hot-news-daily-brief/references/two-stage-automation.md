@@ -9,6 +9,14 @@ Run in a network-enabled runtime before digest generation.
 Command:
 
 ```bash
+# Optional: configure source credentials in local env file first
+# cp /Users/yongkang/projects/skills/News-Summary/scripts/news_sources.env.example \
+#   /Users/yongkang/projects/skills/News-Summary/scripts/news_sources.env
+# # Fill REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET when reddit access is blocked.
+# # Optional social sources:
+# #   - WEIBO_COOKIE / TOUTIAO_COOKIE
+# #   - X_HANDLES + X_NITTER_INSTANCES
+# #   - X_RSS_URLS / XIAOHONGSHU_RSS_URLS (RSSHub or equivalent bridge)
 /bin/zsh /Users/yongkang/projects/skills/News-Summary/scripts/stage_a_collect.sh
 ```
 
@@ -26,8 +34,15 @@ Prompt template:
 Use [$hot-news-daily-brief](/Users/yongkang/projects/skills/News-Summary/.agents/skills/hot-news-daily-brief/SKILL.md).
 Do not browse the internet.
 Read the latest ./data/inbox/news_candidates_*.json, keep last-24-hour items, score hotness, deduplicate events, and generate bilingual digest in this order:
-Top 5, [时政], [金融], [科技-AI], [科技-其他].
-Each story must include Why hot, English summary, 中文总结, Source URL, and absolute published time.
+Top 5, 当日总体总结（约300字）, 数据源抓取与有效性（过去24小时）, [时政], [金融], [科技-AI], [科技-其他].
+Each story must include Why hot, English summary, 中文总结, English word count, Source URL, and absolute published time.
+Hard constraints:
+1) Each story's English summary must be a single long-form paragraph with at least 200 English words.
+2) If any story is under 200 words, expand it before finalizing.
+3) Keep 当日总体总结 around 300 Chinese characters.
+4) Add a source-health section from latest fetch_report, including successful sources and failed sources.
+5) Each category section should output Top3 stories whenever enough reliable candidates exist.
+6) Top 5 must use section champions: Top1 from each section + 1 wildcard next-best item.
 Write result to ./Report/YYYY-MM-DD.md and include full digest in inbox output.
 ```
 

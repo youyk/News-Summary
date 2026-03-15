@@ -88,7 +88,23 @@ def inline_format(text: str) -> str:
     escaped = html.escape(text)
     escaped = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
     escaped = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', escaped)
-    return escaped
+
+    # Auto-link plain URLs (for source bullet lines like "- https://...").
+    chunks = re.split(r"(<a [^>]+>.*?</a>|<code>.*?</code>)", escaped, flags=re.DOTALL)
+
+    def _linkify_plain_url(chunk: str) -> str:
+        def _replace(match: re.Match[str]) -> str:
+            url = match.group(0)
+            return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{url}</a>'
+
+        return re.sub(r"https?://[^\s<]+", _replace, chunk)
+
+    for idx, chunk in enumerate(chunks):
+        if chunk.startswith("<a ") or chunk.startswith("<code>"):
+            continue
+        chunks[idx] = _linkify_plain_url(chunk)
+
+    return "".join(chunks)
 
 
 def markdown_to_html(md_text: str) -> str:

@@ -1,5 +1,6 @@
 # Local credential files (never commit)
 /scripts/gmail.env
+/scripts/news_sources.env
 /.env
 /.env.*
 
@@ -19,3 +20,8 @@
 /Report/*.html
 /data/inbox/news_candidates_*.json
 /data/inbox/manual/*.json
+/data/inbox/manual/*.json.disabled
+
+# Local editor/system noise
+.DS_Store
+*.swp

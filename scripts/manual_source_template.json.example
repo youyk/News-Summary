@@ -1,0 +1,20 @@
+{
+  "items": [
+    {
+      "title": "Platform post or topic title",
+      "url": "https://example.com/post/123",
+      "source": "X @example",
+      "source_group": "social_community",
+      "category_hint": "科技-其他",
+      "summary_hint": "Optional context snippet",
+      "published_at": "2026-03-15T06:30:00+08:00",
+      "hotness_signals": {
+        "editorial_prominence": 4,
+        "engagement_velocity": 4,
+        "cross_source_pickup": null,
+        "source_authority": 2,
+        "public_impact_scope": null
+      }
+    }
+  ]
+}

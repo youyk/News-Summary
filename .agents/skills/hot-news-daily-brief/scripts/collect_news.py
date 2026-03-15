@@ -10,9 +10,11 @@ This script is designed for Stage A of a two-stage pipeline:
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime as dt
 import hashlib
 import json
+import os
 import re
 import urllib.error
 import urllib.parse
@@ -73,6 +75,55 @@ RSS_FEEDS = [
         "base_category": "时政",
         "priority": 3,
     },
+    {
+        "source": "CNN World",
+        "group": "mainstream_news",
+        "url": "http://rss.cnn.com/rss/edition_world.rss",
+        "base_category": "时政",
+        "priority": 4,
+    },
+    {
+        "source": "CNN Business",
+        "group": "finance",
+        "url": "http://rss.cnn.com/rss/money_latest.rss",
+        "base_category": "金融",
+        "priority": 4,
+    },
+    {
+        "source": "CBS Top Stories",
+        "group": "mainstream_news",
+        "url": "https://www.cbsnews.com/latest/rss/main",
+        "base_category": "时政",
+        "priority": 4,
+    },
+    {
+        "source": "CBS World",
+        "group": "mainstream_news",
+        "url": "https://www.cbsnews.com/latest/rss/world",
+        "base_category": "时政",
+        "priority": 4,
+    },
+    {
+        "source": "CBS MoneyWatch",
+        "group": "finance",
+        "url": "https://www.cbsnews.com/latest/rss/moneywatch",
+        "base_category": "金融",
+        "priority": 4,
+    },
+    {
+        "source": "WSJ World",
+        "group": "mainstream_news",
+        "url": "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
+        "base_category": "时政",
+        "priority": 4,
+    },
+    {
+        "source": "WSJ Markets",
+        "group": "finance",
+        "url": "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+        "base_category": "金融",
+        "priority": 4,
+    },
 ]
 
 
@@ -97,6 +148,13 @@ AI_KEYWORDS = {
     "anthropic",
     "deepmind",
     "model",
+    "人工智能",
+    "大模型",
+    "生成式ai",
+    "算力",
+    "ai芯片",
+    "机器人",
+    "自动驾驶",
 }
 FINANCE_KEYWORDS = {
     "stock",
@@ -115,6 +173,21 @@ FINANCE_KEYWORDS = {
     "gdp",
     "recession",
     "dollar",
+    "股市",
+    "a股",
+    "港股",
+    "美股",
+    "汇率",
+    "人民币",
+    "美元",
+    "央行",
+    "通胀",
+    "债券",
+    "原油",
+    "金价",
+    "经济",
+    "财政",
+    "就业",
 }
 POLITICS_KEYWORDS = {
     "election",
@@ -133,6 +206,20 @@ POLITICS_KEYWORDS = {
     "russia",
     "china",
     "taiwan",
+    "政府",
+    "外交",
+    "总统",
+    "总理",
+    "选举",
+    "战争",
+    "制裁",
+    "冲突",
+    "国务院",
+    "国会",
+    "议会",
+    "联合国",
+    "国防",
+    "两会",
 }
 
 
@@ -162,6 +249,79 @@ def parse_args() -> argparse.Namespace:
         help="Max posts per subreddit",
     )
     parser.add_argument(
+        "--reddit-client-id",
+        default="",
+        help="Optional Reddit API client_id (or set REDDIT_CLIENT_ID)",
+    )
+    parser.add_argument(
+        "--reddit-client-secret",
+        default="",
+        help="Optional Reddit API client_secret (or set REDDIT_CLIENT_SECRET)",
+    )
+    parser.add_argument(
+        "--disable-reddit-rss-fallback",
+        action="store_true",
+        help="Disable Reddit RSS fallback when JSON API access is blocked",
+    )
+    parser.add_argument(
+        "--disable-weibo-hotsearch",
+        action="store_true",
+        help="Disable Weibo hot-search collector",
+    )
+    parser.add_argument(
+        "--weibo-limit",
+        type=int,
+        default=30,
+        help="Max topics to keep from Weibo hot search",
+    )
+    parser.add_argument(
+        "--weibo-cookie",
+        default="",
+        help="Optional Weibo cookie (or set WEIBO_COOKIE)",
+    )
+    parser.add_argument(
+        "--disable-toutiao-hotboard",
+        action="store_true",
+        help="Disable Toutiao hot-board collector",
+    )
+    parser.add_argument(
+        "--toutiao-limit",
+        type=int,
+        default=30,
+        help="Max topics to keep from Toutiao hot board",
+    )
+    parser.add_argument(
+        "--toutiao-cookie",
+        default="",
+        help="Optional Toutiao cookie (or set TOUTIAO_COOKIE)",
+    )
+    parser.add_argument(
+        "--x-handles",
+        default="",
+        help="Optional comma-separated X handles for Nitter RSS collector",
+    )
+    parser.add_argument(
+        "--x-limit",
+        type=int,
+        default=20,
+        help="Max posts to keep per X handle",
+    )
+    parser.add_argument(
+        "--x-nitter-instances",
+        default="",
+        help="Optional comma-separated Nitter instances (or set X_NITTER_INSTANCES)",
+    )
+    parser.add_argument(
+        "--x-rss-urls",
+        default="",
+        help="Optional comma-separated X RSS URLs (or set X_RSS_URLS)",
+    )
+    parser.add_argument(
+        "--xiaohongshu-rss-urls",
+        default="",
+        help="Optional comma-separated Xiaohongshu RSS URLs (or set XIAOHONGSHU_RSS_URLS)",
+    )
+    parser.add_argument(
         "--manual-glob",
         default="",
         help="Optional glob for manual JSON source files (for X/Xiaohongshu/custom)",
@@ -177,6 +337,75 @@ def parse_args() -> argparse.Namespace:
         help="Optional ISO timestamp override in UTC (for deterministic tests)",
     )
     return parser.parse_args()
+
+
+def parse_csv_values(raw: str) -> list[str]:
+    if not raw:
+        return []
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def parse_float(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = value.strip().replace(",", "")
+        if not cleaned:
+            return None
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+    return None
+
+
+def engagement_bucket(
+    value: float | None,
+    *,
+    p5: float,
+    p4: float,
+    p3: float,
+    p2: float,
+) -> int | None:
+    if value is None:
+        return None
+    if value >= p5:
+        return 5
+    if value >= p4:
+        return 4
+    if value >= p3:
+        return 3
+    if value >= p2:
+        return 2
+    return 1
+
+
+def make_hotness(
+    editorial_prominence: int | None,
+    *,
+    engagement_velocity: int | None = None,
+    source_authority: int | None = None,
+) -> dict[str, Any]:
+    return {
+        "editorial_prominence": editorial_prominence,
+        "engagement_velocity": engagement_velocity,
+        "cross_source_pickup": None,
+        "source_authority": source_authority,
+        "public_impact_scope": None,
+    }
+
+
+def infer_rss_source_name(url: str, prefix: str) -> str:
+    parsed = urllib.parse.urlsplit(url)
+    host = parsed.netloc or "unknown-host"
+    path = parsed.path.strip("/").replace("/", " ")
+    suffix = f" {path}" if path else ""
+    return f"{prefix} RSS ({host}{suffix})"
+
+
+def env_truthy(name: str) -> bool:
+    value = os.getenv(name, "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
 
 def utc_now(override: str) -> dt.datetime:
@@ -202,9 +431,49 @@ def fetch_text(url: str, timeout: int = 20) -> str:
         return response.read().decode(charset, errors="replace")
 
 
+def fetch_text_with_headers(
+    url: str,
+    headers: dict[str, str],
+    timeout: int = 20,
+    method: str = "GET",
+    data: bytes | None = None,
+) -> str:
+    req_headers = {"User-Agent": USER_AGENT, "Accept": "*/*"}
+    req_headers.update(headers)
+    request = urllib.request.Request(
+        url,
+        headers=req_headers,
+        method=method,
+        data=data,
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        charset = response.headers.get_content_charset() or "utf-8"
+        return response.read().decode(charset, errors="replace")
+
+
 def fetch_json(url: str, timeout: int = 20) -> dict[str, Any]:
     text = fetch_text(url, timeout=timeout)
     return json.loads(text)
+
+
+def fetch_reddit_access_token(client_id: str, client_secret: str) -> str:
+    encoded = urllib.parse.urlencode({"grant_type": "client_credentials"}).encode("utf-8")
+    basic = f"{client_id}:{client_secret}".encode("utf-8")
+    auth = base64.b64encode(basic).decode("ascii")
+    response = fetch_text_with_headers(
+        url="https://www.reddit.com/api/v1/access_token",
+        headers={
+            "Authorization": f"Basic {auth}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method="POST",
+        data=encoded,
+    )
+    payload = json.loads(response)
+    token = str(payload.get("access_token", "")).strip()
+    if not token:
+        raise ValueError(f"Reddit OAuth token response missing access_token: {payload}")
+    return token
 
 
 def strip_html(text: str) -> str:
@@ -251,13 +520,24 @@ def first_text(parent: ET.Element, tag_suffixes: list[str]) -> str:
 
 def category_from_text(text: str, default: str) -> str:
     haystack = (text or "").lower()
-    if any(keyword in haystack for keyword in AI_KEYWORDS):
+    if any(keyword_match(haystack, keyword) for keyword in AI_KEYWORDS):
         return "科技-AI"
-    if any(keyword in haystack for keyword in FINANCE_KEYWORDS):
-        return "金融"
-    if any(keyword in haystack for keyword in POLITICS_KEYWORDS):
+    if any(keyword_match(haystack, keyword) for keyword in POLITICS_KEYWORDS):
         return "时政"
+    if any(keyword_match(haystack, keyword) for keyword in FINANCE_KEYWORDS):
+        return "金融"
     return default
+
+
+def keyword_match(haystack: str, keyword: str) -> bool:
+    key = (keyword or "").strip().lower()
+    if not key:
+        return False
+    # For CJK keywords use plain containment; for Latin tokens require word boundaries.
+    if re.search(r"[a-z0-9]", key):
+        pattern = rf"(?<![a-z0-9]){re.escape(key)}(?![a-z0-9])"
+        return re.search(pattern, haystack) is not None
+    return key in haystack
 
 
 def normalize_url(url: str) -> str:
@@ -390,23 +670,104 @@ def collect_reddit(
     now: dt.datetime,
     window_start: dt.datetime,
     limit: int,
+    oauth_token: str = "",
+    allow_rss_fallback: bool = True,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    url = f"https://www.reddit.com/r/{subreddit}/hot.json?limit={limit}"
-    report: dict[str, Any] = {"source": f"Reddit r/{subreddit}", "url": url}
-    try:
-        data = fetch_json(url)
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
+    source_name = f"Reddit r/{subreddit}"
+    url_public = f"https://www.reddit.com/r/{subreddit}/hot.json?limit={limit}"
+    url_oauth = f"https://oauth.reddit.com/r/{subreddit}/hot?limit={limit}"
+    url_rss = f"https://old.reddit.com/r/{subreddit}/hot/.rss?limit={limit}"
+    report: dict[str, Any] = {
+        "source": source_name,
+        "url": url_oauth if oauth_token else url_public,
+    }
+    attempts: list[str] = []
+
+    children: list[dict[str, Any]] = []
+    mode = ""
+
+    if oauth_token:
+        try:
+            text = fetch_text_with_headers(
+                url_oauth,
+                headers={"Authorization": f"Bearer {oauth_token}"},
+            )
+            data = json.loads(text)
+            children = list(data.get("data", {}).get("children", []))
+            mode = "oauth_json"
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
+            attempts.append(f"oauth_json failed: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            attempts.append(f"oauth_json failed: unexpected {exc}")
+
+    if not children:
+        try:
+            data = fetch_json(url_public)
+            children = list(data.get("data", {}).get("children", []))
+            mode = "public_json"
+            report["url"] = url_public
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
+            attempts.append(f"public_json failed: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            attempts.append(f"public_json failed: unexpected {exc}")
+
+    if not children and allow_rss_fallback:
+        try:
+            feed_text = fetch_text(url_rss)
+            entries = parse_feed_entries(feed_text)
+            items: list[dict[str, Any]] = []
+            for rank, entry in enumerate(entries[:limit], start=1):
+                title = (entry.get("title") or "").strip()
+                post_url = normalize_url((entry.get("url") or "").strip())
+                if not title or not post_url:
+                    continue
+                published = parse_dt(entry.get("published_at_raw", ""))
+                if published and (published < window_start or published > now):
+                    continue
+                snippet = strip_html(entry.get("summary", ""))[:300]
+                combined = f"{title} {snippet}"
+                category = category_from_text(combined, "科技-其他")
+                prominence = 5 if rank <= 3 else (4 if rank <= 10 else 3)
+                item = {
+                    "id": stable_id(source_name, post_url, title),
+                    "title": title,
+                    "url": post_url,
+                    "source": source_name,
+                    "source_group": group,
+                    "category_hint": category,
+                    "summary_hint": snippet,
+                    "published_at": published.isoformat() if published else "",
+                    "fetched_at": now.isoformat(),
+                    "hotness_signals": {
+                        "editorial_prominence": prominence,
+                        "engagement_velocity": None,
+                        "cross_source_pickup": None,
+                        "source_authority": 2,
+                        "public_impact_scope": None,
+                    },
+                    "engagement_raw": {},
+                }
+                items.append(item)
+            report["status"] = "ok"
+            report["fetched"] = len(items)
+            report["mode"] = "rss_fallback"
+            report["url"] = url_rss
+            if attempts:
+                report["attempts"] = attempts
+            return items, report
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError) as exc:
+            attempts.append(f"rss_fallback failed: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            attempts.append(f"rss_fallback failed: unexpected {exc}")
+
+    if not children:
         report["status"] = "error"
-        report["error"] = str(exc)
+        report["error"] = " | ".join(attempts) if attempts else "unknown error"
         report["fetched"] = 0
-        return [], report
-    except Exception as exc:  # noqa: BLE001
-        report["status"] = "error"
-        report["error"] = f"unexpected: {exc}"
-        report["fetched"] = 0
+        if attempts:
+            report["attempts"] = attempts
         return [], report
 
-    children = data.get("data", {}).get("children", [])
     items: list[dict[str, Any]] = []
     for rank, child in enumerate(children, start=1):
         payload = child.get("data", {})
@@ -469,7 +830,351 @@ def collect_reddit(
 
     report["status"] = "ok"
     report["fetched"] = len(items)
+    report["mode"] = mode or "public_json"
+    if attempts:
+        report["attempts"] = attempts
     return items, report
+
+
+def collect_social_rss_urls(
+    urls: list[str],
+    *,
+    source_prefix: str,
+    source_group: str,
+    base_category: str,
+    source_priority: int,
+    now: dt.datetime,
+    window_start: dt.datetime,
+    limit: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not urls:
+        return [], []
+    items: list[dict[str, Any]] = []
+    reports: list[dict[str, Any]] = []
+    for url in urls:
+        cfg = {
+            "source": infer_rss_source_name(url, source_prefix),
+            "group": source_group,
+            "url": url,
+            "base_category": base_category,
+            "priority": source_priority,
+        }
+        src_items, report = collect_rss_source(
+            source_cfg=cfg,
+            now=now,
+            window_start=window_start,
+            limit=limit,
+        )
+        items.extend(src_items)
+        reports.append(report)
+    return items, reports
+
+
+def collect_weibo_hotsearch(
+    now: dt.datetime,
+    window_start: dt.datetime,
+    limit: int,
+    cookie: str = "",
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    url = "https://weibo.com/ajax/side/hotSearch"
+    source_name = "Weibo Hot Search"
+    report: dict[str, Any] = {"source": source_name, "url": url}
+
+    headers = {
+        "Referer": "https://weibo.com/",
+        "Accept": "application/json, text/plain, */*",
+    }
+    if cookie:
+        headers["Cookie"] = cookie
+
+    try:
+        text = fetch_text_with_headers(url, headers=headers)
+        payload = json.loads(text)
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
+        report["status"] = "error"
+        report["error"] = str(exc)
+        report["fetched"] = 0
+        return [], report
+    except Exception as exc:  # noqa: BLE001
+        report["status"] = "error"
+        report["error"] = f"unexpected: {exc}"
+        report["fetched"] = 0
+        return [], report
+
+    topics: list[dict[str, Any]] = []
+    if isinstance(payload, dict):
+        data = payload.get("data")
+        if isinstance(data, dict) and isinstance(data.get("realtime"), list):
+            topics = [topic for topic in data["realtime"] if isinstance(topic, dict)]
+        elif isinstance(payload.get("realtime"), list):
+            topics = [topic for topic in payload["realtime"] if isinstance(topic, dict)]
+
+    if not topics:
+        report["status"] = "error"
+        report["error"] = "unexpected response format: missing realtime topics"
+        report["fetched"] = 0
+        return [], report
+
+    items: list[dict[str, Any]] = []
+    for rank, topic in enumerate(topics[:limit], start=1):
+        title = (
+            str(topic.get("word", "")).strip()
+            or str(topic.get("note", "")).strip()
+            or str(topic.get("title", "")).strip()
+        )
+        if not title:
+            continue
+
+        topic_url = str(topic.get("topic_url", "")).strip()
+        if topic_url.startswith("//"):
+            topic_url = f"https:{topic_url}"
+        if not topic_url:
+            query = urllib.parse.quote_plus(title)
+            topic_url = f"https://s.weibo.com/weibo?q={query}"
+        topic_url = normalize_url(topic_url)
+
+        hot_value = (
+            parse_float(topic.get("raw_hot"))
+            or parse_float(topic.get("num"))
+            or parse_float(topic.get("hot"))
+        )
+        hot_level = engagement_bucket(
+            hot_value,
+            p5=2_000_000,
+            p4=800_000,
+            p3=200_000,
+            p2=50_000,
+        )
+        label_name = str(topic.get("label_name", "")).strip()
+        flag_desc = str(topic.get("flag_desc", "")).strip()
+        summary_hint = " ".join(part for part in [label_name, flag_desc] if part).strip()
+
+        # Topic boards are near-real-time. Keep only window-consistent timestamps.
+        published = now
+        if published < window_start or published > now:
+            continue
+
+        combined = f"{title} {summary_hint}".strip()
+        category = category_from_text(combined, "科技-其他")
+        prominence = 5 if rank <= 3 else (4 if rank <= 10 else 3)
+
+        items.append(
+            {
+                "id": stable_id(source_name, topic_url, title),
+                "title": title,
+                "url": topic_url,
+                "source": source_name,
+                "source_group": "social_community",
+                "category_hint": category,
+                "summary_hint": summary_hint,
+                "published_at": published.isoformat(),
+                "fetched_at": now.isoformat(),
+                "hotness_signals": make_hotness(
+                    prominence,
+                    engagement_velocity=hot_level,
+                    source_authority=2,
+                ),
+                "engagement_raw": {
+                    "raw_hot": topic.get("raw_hot"),
+                    "num": topic.get("num"),
+                },
+            }
+        )
+
+    report["status"] = "ok"
+    report["fetched"] = len(items)
+    return items, report
+
+
+def collect_toutiao_hotboard(
+    now: dt.datetime,
+    window_start: dt.datetime,
+    limit: int,
+    cookie: str = "",
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    url = "https://www.toutiao.com/hot-event/hot-board/?origin=toutiao_pc"
+    source_name = "Toutiao Hot Board"
+    report: dict[str, Any] = {"source": source_name, "url": url}
+    headers = {
+        "Referer": "https://www.toutiao.com/hot-event/hot-board/",
+        "Accept": "application/json, text/plain, */*",
+    }
+    if cookie:
+        headers["Cookie"] = cookie
+
+    try:
+        text = fetch_text_with_headers(url, headers=headers)
+        payload = json.loads(text)
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
+        report["status"] = "error"
+        report["error"] = str(exc)
+        report["fetched"] = 0
+        return [], report
+    except Exception as exc:  # noqa: BLE001
+        report["status"] = "error"
+        report["error"] = f"unexpected: {exc}"
+        report["fetched"] = 0
+        return [], report
+
+    rows: list[dict[str, Any]] = []
+    if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+        rows = [item for item in payload["data"] if isinstance(item, dict)]
+
+    if not rows:
+        report["status"] = "error"
+        report["error"] = "unexpected response format: missing data list"
+        report["fetched"] = 0
+        return [], report
+
+    items: list[dict[str, Any]] = []
+    for rank, row in enumerate(rows[:limit], start=1):
+        title = str(row.get("Title") or row.get("title") or "").strip()
+        if not title:
+            continue
+
+        topic_url = str(row.get("Url") or row.get("url") or "").strip()
+        if topic_url.startswith("/"):
+            topic_url = f"https://www.toutiao.com{topic_url}"
+        if not topic_url:
+            query = urllib.parse.quote_plus(title)
+            topic_url = f"https://so.toutiao.com/search?keyword={query}"
+        topic_url = normalize_url(topic_url)
+
+        hot_value = (
+            parse_float(row.get("HotValue"))
+            or parse_float(row.get("hot_value"))
+            or parse_float(row.get("hotValue"))
+        )
+        hot_level = engagement_bucket(
+            hot_value,
+            p5=2_000_000,
+            p4=800_000,
+            p3=250_000,
+            p2=80_000,
+        )
+        label = str(row.get("Label") or row.get("label") or "").strip()
+        summary_hint = label
+
+        published = now
+        if published < window_start or published > now:
+            continue
+
+        combined = f"{title} {summary_hint}".strip()
+        category = category_from_text(combined, "科技-其他")
+        prominence = 5 if rank <= 3 else (4 if rank <= 10 else 3)
+
+        items.append(
+            {
+                "id": stable_id(source_name, topic_url, title),
+                "title": title,
+                "url": topic_url,
+                "source": source_name,
+                "source_group": "social_community",
+                "category_hint": category,
+                "summary_hint": summary_hint,
+                "published_at": published.isoformat(),
+                "fetched_at": now.isoformat(),
+                "hotness_signals": make_hotness(
+                    prominence,
+                    engagement_velocity=hot_level,
+                    source_authority=2,
+                ),
+                "engagement_raw": {
+                    "hot_value": row.get("HotValue") or row.get("hot_value") or row.get("hotValue"),
+                },
+            }
+        )
+
+    report["status"] = "ok"
+    report["fetched"] = len(items)
+    return items, report
+
+
+def collect_x_nitter_handles(
+    handles: list[str],
+    instances: list[str],
+    now: dt.datetime,
+    window_start: dt.datetime,
+    limit: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not handles:
+        return [], []
+
+    if not instances:
+        instances = [
+            "https://nitter.net",
+            "https://nitter.poast.org",
+            "https://nitter.privacydev.net",
+        ]
+
+    all_items: list[dict[str, Any]] = []
+    reports: list[dict[str, Any]] = []
+
+    for handle in handles:
+        clean_handle = handle.lstrip("@")
+        source_name = f"X @{clean_handle}"
+        attempts: list[str] = []
+        handle_items: list[dict[str, Any]] = []
+        selected_url = ""
+
+        for instance in instances:
+            base = instance.rstrip("/")
+            feed_url = f"{base}/{clean_handle}/rss"
+            selected_url = feed_url
+            try:
+                feed_text = fetch_text(feed_url)
+                entries = parse_feed_entries(feed_text)
+                for rank, entry in enumerate(entries[:limit], start=1):
+                    title = (entry.get("title") or "").strip()
+                    post_url = normalize_url((entry.get("url") or "").strip())
+                    if not title or not post_url:
+                        continue
+                    published = parse_dt(entry.get("published_at_raw", ""))
+                    if published and (published < window_start or published > now):
+                        continue
+                    snippet = strip_html(entry.get("summary", ""))[:300]
+                    category = category_from_text(f"{title} {snippet}", "科技-其他")
+                    prominence = 5 if rank <= 3 else (4 if rank <= 10 else 3)
+                    handle_items.append(
+                        {
+                            "id": stable_id(source_name, post_url, title),
+                            "title": title,
+                            "url": post_url,
+                            "source": source_name,
+                            "source_group": "social_community",
+                            "category_hint": category,
+                            "summary_hint": snippet,
+                            "published_at": published.isoformat() if published else "",
+                            "fetched_at": now.isoformat(),
+                            "hotness_signals": make_hotness(
+                                prominence,
+                                source_authority=1,
+                            ),
+                        }
+                    )
+                break
+            except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError) as exc:
+                attempts.append(f"{feed_url} failed: {exc}")
+            except Exception as exc:  # noqa: BLE001
+                attempts.append(f"{feed_url} failed: unexpected {exc}")
+
+        report: dict[str, Any] = {"source": source_name, "url": selected_url}
+        if handle_items:
+            report["status"] = "ok"
+            report["fetched"] = len(handle_items)
+            report["mode"] = "nitter_rss"
+            if attempts:
+                report["attempts"] = attempts
+            all_items.extend(handle_items)
+        else:
+            report["status"] = "error"
+            report["fetched"] = 0
+            report["error"] = " | ".join(attempts) if attempts else "no accessible nitter instance"
+            if attempts:
+                report["attempts"] = attempts
+        reports.append(report)
+
+    return all_items, reports
 
 
 def collect_manual_files(
@@ -562,11 +1267,45 @@ def main() -> int:
     args = parse_args()
     now = utc_now(args.now)
     window_start = now - dt.timedelta(hours=args.window_hours)
+    reddit_client_id = args.reddit_client_id.strip() or os.getenv("REDDIT_CLIENT_ID", "").strip()
+    reddit_client_secret = args.reddit_client_secret.strip() or os.getenv(
+        "REDDIT_CLIENT_SECRET", ""
+    ).strip()
+    weibo_cookie = args.weibo_cookie.strip() or os.getenv("WEIBO_COOKIE", "").strip()
+    toutiao_cookie = args.toutiao_cookie.strip() or os.getenv("TOUTIAO_COOKIE", "").strip()
+    x_handles = parse_csv_values(args.x_handles or os.getenv("X_HANDLES", ""))
+    x_instances = parse_csv_values(args.x_nitter_instances or os.getenv("X_NITTER_INSTANCES", ""))
+    x_rss_urls = parse_csv_values(args.x_rss_urls or os.getenv("X_RSS_URLS", ""))
+    xiaohongshu_rss_urls = parse_csv_values(
+        args.xiaohongshu_rss_urls or os.getenv("XIAOHONGSHU_RSS_URLS", "")
+    )
+    disable_weibo_hotsearch = args.disable_weibo_hotsearch or env_truthy("DISABLE_WEIBO_HOTSEARCH")
+    disable_toutiao_hotboard = args.disable_toutiao_hotboard or env_truthy(
+        "DISABLE_TOUTIAO_HOTBOARD"
+    )
 
     fetch_reports: list[dict[str, Any]] = []
     items: list[dict[str, Any]] = []
+    reddit_oauth_token = ""
 
     if not args.skip_network_sources:
+        if reddit_client_id and reddit_client_secret:
+            try:
+                reddit_oauth_token = fetch_reddit_access_token(
+                    client_id=reddit_client_id,
+                    client_secret=reddit_client_secret,
+                )
+            except Exception as exc:  # noqa: BLE001
+                fetch_reports.append(
+                    {
+                        "source": "Reddit OAuth bootstrap",
+                        "url": "https://www.reddit.com/api/v1/access_token",
+                        "status": "error",
+                        "error": str(exc),
+                        "fetched": 0,
+                    }
+                )
+
         for source_cfg in RSS_FEEDS:
             src_items, report = collect_rss_source(
                 source_cfg=source_cfg,
@@ -584,9 +1323,67 @@ def main() -> int:
                 now=now,
                 window_start=window_start,
                 limit=args.reddit_limit,
+                oauth_token=reddit_oauth_token,
+                allow_rss_fallback=not args.disable_reddit_rss_fallback,
             )
             items.extend(src_items)
             fetch_reports.append(report)
+
+        if not disable_weibo_hotsearch:
+            src_items, report = collect_weibo_hotsearch(
+                now=now,
+                window_start=window_start,
+                limit=args.weibo_limit,
+                cookie=weibo_cookie,
+            )
+            items.extend(src_items)
+            fetch_reports.append(report)
+
+        if not disable_toutiao_hotboard:
+            src_items, report = collect_toutiao_hotboard(
+                now=now,
+                window_start=window_start,
+                limit=args.toutiao_limit,
+                cookie=toutiao_cookie,
+            )
+            items.extend(src_items)
+            fetch_reports.append(report)
+
+        x_items, x_reports = collect_x_nitter_handles(
+            handles=x_handles,
+            instances=x_instances,
+            now=now,
+            window_start=window_start,
+            limit=args.x_limit,
+        )
+        items.extend(x_items)
+        fetch_reports.extend(x_reports)
+
+        x_feed_items, x_feed_reports = collect_social_rss_urls(
+            urls=x_rss_urls,
+            source_prefix="X",
+            source_group="social_community",
+            base_category="科技-其他",
+            source_priority=2,
+            now=now,
+            window_start=window_start,
+            limit=args.x_limit,
+        )
+        items.extend(x_feed_items)
+        fetch_reports.extend(x_feed_reports)
+
+        xhs_items, xhs_reports = collect_social_rss_urls(
+            urls=xiaohongshu_rss_urls,
+            source_prefix="Xiaohongshu",
+            source_group="social_community",
+            base_category="科技-其他",
+            source_priority=2,
+            now=now,
+            window_start=window_start,
+            limit=args.limit_per_source,
+        )
+        items.extend(xhs_items)
+        fetch_reports.extend(xhs_reports)
 
     manual_items, manual_reports = collect_manual_files(
         manual_glob=args.manual_glob,

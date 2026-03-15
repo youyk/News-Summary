@@ -24,7 +24,10 @@ import html
 import json
 import os
 import re
+import socket
+import ssl
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -35,6 +38,129 @@ from typing import Any
 
 GMAIL_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GMAIL_SEND_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+RETRYABLE_HTTP_CODES = {408, 425, 429, 500, 502, 503, 504}
+
+
+def env_int(name: str, default: int, minimum: int = 1) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        print(
+            f"[WARN] Invalid integer for {name}: {raw!r}. Fallback to {default}.",
+            file=sys.stderr,
+        )
+        return default
+    if value < minimum:
+        print(
+            f"[WARN] {name}={value} is below minimum {minimum}. Use {minimum}.",
+            file=sys.stderr,
+        )
+        return minimum
+    return value
+
+
+def is_retryable_error(exc: Exception) -> bool:
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in RETRYABLE_HTTP_CODES
+
+    if isinstance(
+        exc,
+        (
+            ssl.SSLError,
+            socket.timeout,
+            TimeoutError,
+            ConnectionResetError,
+            ConnectionAbortedError,
+            ConnectionRefusedError,
+        ),
+    ):
+        return True
+
+    if isinstance(exc, urllib.error.URLError):
+        reason = exc.reason
+        if isinstance(
+            reason,
+            (
+                ssl.SSLError,
+                socket.timeout,
+                TimeoutError,
+                ConnectionResetError,
+                ConnectionAbortedError,
+                ConnectionRefusedError,
+            ),
+        ):
+            return True
+        reason_text = str(reason).lower()
+        retryable_signals = (
+            "timed out",
+            "temporary failure",
+            "connection reset",
+            "connection refused",
+            "remote end closed connection",
+            "eof occurred in violation of protocol",
+        )
+        return any(signal in reason_text for signal in retryable_signals)
+
+    return False
+
+
+def post_request_with_retry(
+    request: urllib.request.Request,
+    *,
+    endpoint_name: str,
+) -> str:
+    timeout_seconds = env_int("GMAIL_HTTP_TIMEOUT_SECONDS", 30)
+    max_attempts = env_int("GMAIL_HTTP_RETRIES", 3)
+    base_backoff_seconds = env_int("GMAIL_HTTP_BACKOFF_SECONDS", 2)
+
+    context = ssl.create_default_context()
+    # Gmail endpoints require modern TLS; making it explicit avoids downgraded handshake issues.
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+
+    last_exc: Exception | None = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            with urllib.request.urlopen(
+                request,
+                timeout=timeout_seconds,
+                context=context,
+            ) as response:
+                charset = response.headers.get_content_charset() or "utf-8"
+                return response.read().decode(charset, errors="replace")
+        except urllib.error.HTTPError as exc:
+            response_body = exc.read().decode("utf-8", errors="replace")
+            if is_retryable_error(exc) and attempt < max_attempts:
+                backoff = base_backoff_seconds * (2 ** (attempt - 1))
+                print(
+                    f"[WARN] {endpoint_name} failed (HTTP {exc.code}) on attempt "
+                    f"{attempt}/{max_attempts}; retry in {backoff}s.",
+                    file=sys.stderr,
+                )
+                time.sleep(backoff)
+                continue
+            raise RuntimeError(
+                f"{endpoint_name} failed with HTTP {exc.code}: {response_body}"
+            ) from exc
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if is_retryable_error(exc) and attempt < max_attempts:
+                backoff = base_backoff_seconds * (2 ** (attempt - 1))
+                print(
+                    f"[WARN] {endpoint_name} transient error on attempt "
+                    f"{attempt}/{max_attempts}: {exc}. retry in {backoff}s.",
+                    file=sys.stderr,
+                )
+                time.sleep(backoff)
+                continue
+            raise RuntimeError(f"{endpoint_name} request failed: {exc}") from exc
+
+    if last_exc is not None:
+        raise RuntimeError(f"{endpoint_name} request failed: {last_exc}") from last_exc
+    raise RuntimeError(f"{endpoint_name} request failed unexpectedly")
 
 
 def parse_args() -> argparse.Namespace:
@@ -126,22 +252,27 @@ def request_json(
     url: str,
     payload: dict[str, Any],
     headers: dict[str, str] | None = None,
+    endpoint_name: str = "HTTP JSON endpoint",
 ) -> dict[str, Any]:
     encoded = json.dumps(payload).encode("utf-8")
     req_headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
+        "User-Agent": "news-summary-gmail-sender/1.0",
     }
     if headers:
         req_headers.update(headers)
     request = urllib.request.Request(url, data=encoded, headers=req_headers, method="POST")
-    with urllib.request.urlopen(request, timeout=30) as response:
-        charset = response.headers.get_content_charset() or "utf-8"
-        text = response.read().decode(charset, errors="replace")
+    text = post_request_with_retry(request, endpoint_name=endpoint_name)
     return json.loads(text)
 
 
-def request_form(url: str, form: dict[str, str]) -> dict[str, Any]:
+def request_form(
+    url: str,
+    form: dict[str, str],
+    *,
+    endpoint_name: str = "HTTP form endpoint",
+) -> dict[str, Any]:
     body = urllib.parse.urlencode(form).encode("utf-8")
     request = urllib.request.Request(
         url,
@@ -149,12 +280,11 @@ def request_form(url: str, form: dict[str, str]) -> dict[str, Any]:
         headers={
             "Content-Type": "application/x-www-form-urlencoded",
             "Accept": "application/json",
+            "User-Agent": "news-summary-gmail-sender/1.0",
         },
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        charset = response.headers.get_content_charset() or "utf-8"
-        text = response.read().decode(charset, errors="replace")
+    text = post_request_with_retry(request, endpoint_name=endpoint_name)
     return json.loads(text)
 
 
@@ -182,6 +312,7 @@ def access_token_from_env() -> str:
             "refresh_token": refresh_token,
             "grant_type": "refresh_token",
         },
+        endpoint_name="Gmail OAuth token exchange",
     )
     token = str(response.get("access_token", "")).strip()
     if not token:
@@ -220,6 +351,7 @@ def send_via_gmail_api(access_token: str, raw_message: str) -> dict[str, Any]:
         GMAIL_SEND_URL,
         {"raw": raw_message},
         headers={"Authorization": f"Bearer {access_token}"},
+        endpoint_name="Gmail message send",
     )
 
 

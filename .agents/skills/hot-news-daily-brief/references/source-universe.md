@@ -9,6 +9,8 @@ Prioritize several from this group every run:
 - Reuters
 - Associated Press (AP)
 - BBC
+- CNN
+- CBS News
 - The New York Times
 - The Wall Street Journal
 - Financial Times
@@ -69,4 +71,3 @@ Collect at least one of these signals when available:
 - Never treat social virality as sufficient evidence by itself.
 - Confirm high-impact claims with at least one authoritative outlet.
 - Label unconfirmed details explicitly or exclude them.
-
