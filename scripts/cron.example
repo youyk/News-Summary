@@ -6,10 +6,14 @@
 # and set NEWS_DIGEST_TO plus Gmail OAuth variables. This file is gitignored.
 # NEWS_DIGEST_MAIL_CONTENT_MODE supports: plain | multipart | html-only.
 # Stage C validates digest quality by default (English min words + mandatory source-health section).
+# Stage C now auto-syncs "数据源抓取与有效性" from latest data/inbox/news_candidates_*.json before validation.
 # If Google API requires proxy from cron environment, set HTTPS_PROXY/HTTP_PROXY in gmail.env.
 
-# Stage A (online): collect candidates at 06:30 every day
-30 6 * * * /bin/zsh /Users/yongkang/projects/skills/News-Summary/scripts/stage_a_collect.sh >> /Users/yongkang/projects/skills/News-Summary/Report/stage_a_collect.log 2>&1
+# Stage A (online): collect candidates at 06:30 every day (default no OAuth + no Playwright)
+30 6 * * * ENABLE_SOCIAL_PLAYWRIGHT=0 /bin/zsh /Users/yongkang/projects/skills/News-Summary/scripts/stage_a_collect.sh >> /Users/yongkang/projects/skills/News-Summary/Report/stage_a_collect.log 2>&1
 
 # Stage C (online): send final report by Gmail API at 07:05 every day
 5 7 * * * /bin/zsh /Users/yongkang/projects/skills/News-Summary/scripts/stage_c_send_gmail.sh >> /Users/yongkang/projects/skills/News-Summary/Report/stage_c_send.log 2>&1
+
+# Manual recovery (run only when Reddit collection is degraded in daily report):
+# /bin/zsh -lc 'ENABLE_SOCIAL_PLAYWRIGHT=1 SOCIAL_PLAYWRIGHT_REQUIRED=1 SOCIAL_PLAYWRIGHT_REQUIRE_REDDIT_ITEMS=1 SOCIAL_PLAYWRIGHT_LOGIN_WAIT_SECONDS=180 /bin/zsh /Users/yongkang/projects/skills/News-Summary/scripts/stage_a_collect.sh'

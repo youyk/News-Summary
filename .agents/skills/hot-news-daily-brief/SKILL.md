@@ -1,6 +1,6 @@
 ---
 name: hot-news-daily-brief
-description: Build a two-stage daily hot-news system for environments where Codex automation cannot access the internet. Stage A (online collector) fetches last-24-hour candidates from mainstream and community sources into local JSON files. Stage B (offline Codex summarizer) reads local candidates and outputs a bilingual digest with Top 5 plus [时政], [金融], [科技-AI], and [科技-其他]. Use when users need recurring news summaries, hot-story ranking, or email-ready reports under restricted-network automation.
+description: Build a two-stage daily hot-news system for environments where Codex automation cannot access the internet. Stage A (online collector) fetches last-24-hour candidates from mainstream and community sources into local JSON files. Stage B (offline Codex summarizer) reads local candidates and outputs a bilingual digest with Top 5 plus [时政], [金融], [科技-AI], [科技-其他], and optional [X 热点]. Use when users need recurring news summaries, hot-story ranking, or email-ready reports under restricted-network automation.
 ---
 
 # Hot News Daily Brief
@@ -46,6 +46,7 @@ Notes:
   - Weibo hot search: `WEIBO_COOKIE` (optional)
   - Toutiao hot board: `TOUTIAO_COOKIE` (optional)
   - X via Nitter RSS: `X_HANDLES`, `X_NITTER_INSTANCES`
+  - Reddit/X Playwright fallback: `ENABLE_SOCIAL_PLAYWRIGHT=1`, `REDDIT_PLAYWRIGHT_SUBREDDITS`, `X_PLAYWRIGHT_HANDLES`
   - RSS bridge (RSSHub, etc.): `X_RSS_URLS`, `XIAOHONGSHU_RSS_URLS`
   - Xiaohongshu Playwright mode: `ENABLE_XHS_PLAYWRIGHT=1`, `XIAOHONGSHU_SHARE_URLS` (or `XIAOHONGSHU_URLS_FILE`)
 
@@ -65,6 +66,7 @@ Run this stage in Codex automation even when internet is blocked.
    - `[金融]`
    - `[科技-AI]`
    - `[科技-其他]`
+   - `[X 热点]`（可选：当 `source` 来自 X/Twitter 且有可靠候选时输出）
 6. Save to:
    - `./Report/YYYY-MM-DD.md`
 
@@ -72,6 +74,7 @@ Use `references/two-stage-automation.md` for prompt templates.
 
 Ranking rules:
 - Each category section (`[时政]`, `[金融]`, `[科技-AI]`, `[科技-其他]`) should output Top3 stories by hotness whenever enough reliable candidates exist.
+- If X/Twitter candidates are available, add an independent `[X 热点]` section with Top3 by hotness/engagement, and prefer items with strong cross-source context (shared links with verifiable article context).
 - `Top 5 Most Important` should be composed from section champions:
   - include Top1 from each of the four sections (4 items total),
   - plus one wildcard item (highest remaining hotness across all sections).
@@ -149,12 +152,16 @@ Use this exact top-level layout:
 
 ## [科技-其他]
 ...
+
+## [X 热点]
+...
 ```
 
 Formatting rules:
 - Put Top 5 before all sections.
 - Top 5 must include one Top1 from each section, plus one wildcard item.
 - Each section should provide Top3 stories when enough candidates exist; if fewer than 3 reliable items exist, explain with `无可信高热度新闻` for missing slots.
+- `[X 热点]` is optional; when present it should also provide Top3 and can cite both post URL and shared-link URLs.
 - Keep `当日总体总结` at around 300 Chinese characters.
 - `数据源抓取与有效性` must reflect actual `fetch_report` results from local candidate file.
 - Keep one story per heading.
@@ -185,6 +192,7 @@ Preferred path: Gmail API OAuth (no SMTP dependency).
 - `references/social-platform-access.md`: X/微博/小红书/头条 access options.
 - `references/gmail-api-auth.md`: OAuth and token setup for Gmail API sending.
 - `scripts/collect_news.py`: online collector that writes local candidate JSON.
+- `scripts/collect_social_playwright.py`: browser fallback collector for Reddit/X.
 - `scripts/gmail_oauth_bootstrap.py`: one-time helper to obtain OAuth refresh token.
 - `scripts/render_digest_html.py`: render markdown digest into styled HTML email body.
 - `scripts/send_summary_gmail_api.py`: Gmail API sender (OAuth refresh token).

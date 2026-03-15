@@ -17,6 +17,7 @@ from pathlib import Path
 
 
 SECTION_HEADERS = ["[时政]", "[金融]", "[科技-AI]", "[科技-其他]"]
+OPTIONAL_SECTION_HEADERS = ["[X 热点]"]
 REQUIRED_TOP5_CATEGORY_TAGS = {"时政", "金融", "科技-AI", "科技-其他"}
 
 
@@ -159,8 +160,12 @@ def validate_story_english_words(
 ) -> None:
     story_count = 0
     checked_count = 0
+    sections_to_check = list(SECTION_HEADERS)
+    for optional in OPTIONAL_SECTION_HEADERS:
+        if extract_section(full_text, optional):
+            sections_to_check.append(optional)
 
-    for section in SECTION_HEADERS:
+    for section in sections_to_check:
         section_body = extract_section(full_text, section)
         if not section_body:
             continue

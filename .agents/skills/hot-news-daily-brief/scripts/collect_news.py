@@ -1213,7 +1213,7 @@ def collect_manual_files(
                     continue
                 summary_hint = strip_html(str(row.get("summary_hint", "")).strip())
                 category = str(row.get("category_hint", "")).strip()
-                if category not in {"时政", "金融", "科技-AI", "科技-其他"}:
+                if category not in {"时政", "金融", "科技-AI", "科技-其他", "X-热点"}:
                     category = category_from_text(f"{title} {summary_hint}", "科技-其他")
                 item = {
                     "id": stable_id(source, url, title),
@@ -1236,6 +1236,39 @@ def collect_manual_files(
                         },
                     ),
                 }
+                related_urls_raw = row.get("related_source_urls")
+                if isinstance(related_urls_raw, list):
+                    related_urls = []
+                    for candidate in related_urls_raw:
+                        normalized = normalize_url(str(candidate).strip())
+                        if normalized and normalized not in related_urls:
+                            related_urls.append(normalized)
+                    if related_urls:
+                        item["related_source_urls"] = related_urls[:6]
+
+                linked_contexts_raw = row.get("linked_contexts")
+                if isinstance(linked_contexts_raw, list):
+                    cleaned_contexts: list[dict[str, str]] = []
+                    for entry in linked_contexts_raw:
+                        if not isinstance(entry, dict):
+                            continue
+                        ctx_url = normalize_url(str(entry.get("url", "")).strip())
+                        if not ctx_url:
+                            continue
+                        cleaned_context = {"url": ctx_url}
+                        title_text = strip_html(str(entry.get("title", "")).strip())
+                        if title_text:
+                            cleaned_context["title"] = title_text[:220]
+                        summary_text = strip_html(str(entry.get("summary", "")).strip())
+                        if summary_text:
+                            cleaned_context["summary"] = summary_text[:360]
+                        cleaned_contexts.append(cleaned_context)
+                    if cleaned_contexts:
+                        item["linked_contexts"] = cleaned_contexts[:3]
+
+                engagement_raw = row.get("engagement_raw")
+                if isinstance(engagement_raw, dict):
+                    item["engagement_raw"] = engagement_raw
                 items.append(item)
                 added += 1
             report["status"] = "ok"
@@ -1261,6 +1294,64 @@ def deduplicate(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen_titles.add(title_key)
         result.append(item)
     return result
+
+
+def status_is_ok(status: Any) -> bool:
+    return str(status).strip().lower().startswith("ok")
+
+
+def apply_playwright_fallback_status(
+    fetch_reports: list[dict[str, Any]],
+    items: list[dict[str, Any]],
+) -> None:
+    reddit_counts: dict[str, int] = {}
+    x_counts: dict[str, int] = {}
+
+    for item in items:
+        source = str(item.get("source", "")).strip()
+        reddit_match = re.match(r"^Reddit \(Playwright\)\s+r/([A-Za-z0-9_]+)$", source)
+        if reddit_match:
+            key = reddit_match.group(1).lower()
+            reddit_counts[key] = reddit_counts.get(key, 0) + 1
+            continue
+        x_match = re.match(r"^X \(Playwright\)\s+@([A-Za-z0-9_]+)$", source)
+        if x_match:
+            key = x_match.group(1).lower()
+            x_counts[key] = x_counts.get(key, 0) + 1
+
+    for report in fetch_reports:
+        source_name = str(report.get("source", "")).strip()
+        if status_is_ok(report.get("status")):
+            continue
+
+        reddit_src = re.match(r"^Reddit r/([A-Za-z0-9_]+)$", source_name)
+        if reddit_src:
+            key = reddit_src.group(1).lower()
+            fallback_count = reddit_counts.get(key, 0)
+            if fallback_count > 0:
+                primary_error = str(report.get("error", "")).strip()
+                report["status"] = "ok"
+                report["mode"] = "playwright_fallback"
+                report["fetched"] = fallback_count
+                report["fallback_source"] = "manual:social_playwright.json"
+                if primary_error:
+                    report["primary_error"] = primary_error
+                report.pop("error", None)
+            continue
+
+        x_src = re.match(r"^X @([A-Za-z0-9_]+)$", source_name)
+        if x_src:
+            key = x_src.group(1).lower()
+            fallback_count = x_counts.get(key, 0)
+            if fallback_count > 0:
+                primary_error = str(report.get("error", "")).strip()
+                report["status"] = "ok"
+                report["mode"] = "playwright_fallback"
+                report["fetched"] = fallback_count
+                report["fallback_source"] = "manual:social_playwright.json"
+                if primary_error:
+                    report["primary_error"] = primary_error
+                report.pop("error", None)
 
 
 def main() -> int:
@@ -1394,14 +1485,15 @@ def main() -> int:
     fetch_reports.extend(manual_reports)
 
     deduped = deduplicate(items)
+    apply_playwright_fallback_status(fetch_reports=fetch_reports, items=deduped)
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     filename = f"news_candidates_{now.strftime('%Y%m%dT%H%M%SZ')}.json"
     out_path = out_dir / filename
 
-    ok_sources = sum(1 for item in fetch_reports if item.get("status") == "ok")
-    failed_sources = sum(1 for item in fetch_reports if item.get("status") != "ok")
+    ok_sources = sum(1 for item in fetch_reports if status_is_ok(item.get("status")))
+    failed_sources = sum(1 for item in fetch_reports if not status_is_ok(item.get("status")))
 
     payload = {
         "schema_version": "1.0",

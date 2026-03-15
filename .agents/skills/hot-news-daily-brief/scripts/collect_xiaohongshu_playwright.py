@@ -53,6 +53,16 @@ def parse_args() -> argparse.Namespace:
         help="Run browser in headless mode",
     )
     parser.add_argument(
+        "--channel",
+        default="",
+        help="Optional browser channel (e.g. chrome, msedge). Overrides bundled chromium.",
+    )
+    parser.add_argument(
+        "--executable-path",
+        default="",
+        help="Optional browser executable path for Playwright launch",
+    )
+    parser.add_argument(
         "--max-items",
         type=int,
         default=20,
@@ -201,6 +211,8 @@ def infer_category(text: str) -> str:
 def main() -> int:
     args = parse_args()
     now = utc_now(args.now)
+    channel = args.channel.strip() or "chrome"
+    executable_path = args.executable_path.strip()
     urls = parse_url_list(args.urls)
     urls.extend(read_urls_file(args.urls_file))
     urls = deduplicate_urls(urls)[: max(args.max_items, 1)]
@@ -220,18 +232,24 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001
         print("[ERROR] Playwright is not available.")
         print(f"[ERROR] {exc}")
-        print("[HINT] Install with: pip3 install playwright && playwright install chromium")
+        print("[HINT] Install with: pip3 install playwright (browser channel mode can use local Chrome).")
         return 2
 
     items: list[dict[str, Any]] = []
     profile_dir = str(Path(args.user_data_dir).expanduser())
     with sync_playwright() as playwright:
-        context = playwright.chromium.launch_persistent_context(
-            user_data_dir=profile_dir,
-            headless=args.headless,
-            viewport={"width": 1400, "height": 900},
-            locale="zh-CN",
-        )
+        launch_kwargs: dict[str, Any] = {
+            "user_data_dir": profile_dir,
+            "headless": args.headless,
+            "viewport": {"width": 1400, "height": 900},
+            "locale": "zh-CN",
+        }
+        if executable_path:
+            launch_kwargs["executable_path"] = executable_path
+        elif channel:
+            launch_kwargs["channel"] = channel
+
+        context = playwright.chromium.launch_persistent_context(**launch_kwargs)
         page = context.new_page()
         page.set_default_timeout(args.timeout_ms)
 

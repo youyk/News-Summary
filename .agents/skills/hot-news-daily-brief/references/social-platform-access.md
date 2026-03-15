@@ -48,8 +48,21 @@ export X_NITTER_INSTANCES="https://nitter.net,https://nitter.poast.org"
 ### Important limitation
 - Nitter availability depends on your network and mirror health.
 - If all mirrors fail, use one of these fallbacks:
+  - `Playwright fallback` with logged-in browser session (newly added).
   - `X_RSS_URLS` with your own RSS bridge.
   - Manual import JSON under `data/inbox/manual/`.
+
+Playwright mode example:
+```bash
+export NEWS_SUMMARY_PLAYWRIGHT_PYTHON_BIN="/Users/yongkang/projects/skills/News-Summary/.venv/bin/python"
+export ENABLE_SOCIAL_PLAYWRIGHT=1
+export X_PLAYWRIGHT_HANDLES="openai,sama,elonmusk"
+export SOCIAL_PLAYWRIGHT_LOGIN_WAIT_SECONDS=120
+export SOCIAL_PLAYWRIGHT_HEADLESS=0
+export SOCIAL_PLAYWRIGHT_CHANNEL="chrome"
+# Optional explicit profile dir (default is project-local .cache path)
+# export SOCIAL_PLAYWRIGHT_USER_DATA_DIR="/Users/yongkang/projects/skills/News-Summary/.cache/news-summary/social-playwright-profile"
+```
 
 ## 4) Xiaohongshu
 
@@ -67,10 +80,14 @@ export XIAOHONGSHU_RSS_URLS="https://rsshub.example.com/xiaohongshu/user/..."
 
 Playwright mode example:
 ```bash
+export NEWS_SUMMARY_PLAYWRIGHT_PYTHON_BIN="/Users/yongkang/projects/skills/News-Summary/.venv/bin/python"
 export ENABLE_XHS_PLAYWRIGHT=1
 export XIAOHONGSHU_SHARE_URLS="https://www.xiaohongshu.com/discovery/item/69b639970000000023004d55"
 export XHS_LOGIN_WAIT_SECONDS=90
 export XHS_PLAYWRIGHT_HEADLESS=0
+export XHS_PLAYWRIGHT_CHANNEL="chrome"
+# Optional explicit profile dir (default is project-local .cache path)
+# export XHS_PLAYWRIGHT_USER_DATA_DIR="/Users/yongkang/projects/skills/News-Summary/.cache/news-summary/xhs-playwright-profile"
 ```
 
 Then run:
@@ -80,6 +97,26 @@ Then run:
 
 This generates/updates:
 - `/Users/yongkang/projects/skills/News-Summary/data/inbox/manual/xiaohongshu_playwright.json`
+
+## 4.5) Reddit fallback via Playwright
+
+When Reddit JSON/RSS is blocked, you can collect from browser-rendered pages:
+
+```bash
+export NEWS_SUMMARY_PLAYWRIGHT_PYTHON_BIN="/Users/yongkang/projects/skills/News-Summary/.venv/bin/python"
+export ENABLE_SOCIAL_PLAYWRIGHT=1
+export REDDIT_PLAYWRIGHT_SUBREDDITS="news,worldnews,technology,artificial"
+export SOCIAL_PLAYWRIGHT_LOGIN_WAIT_SECONDS=120
+export SOCIAL_PLAYWRIGHT_HEADLESS=0
+export SOCIAL_PLAYWRIGHT_CHANNEL="chrome"
+```
+
+This generates/updates:
+- `/Users/yongkang/projects/skills/News-Summary/data/inbox/manual/social_playwright.json`
+
+When this file contains `Reddit (Playwright) r/...` or `X (Playwright) @...` entries,
+the main collector auto-converts corresponding `Reddit r/...` / `X @...` fetch failures
+into `playwright_fallback` success status in `fetch_report`.
 
 ## 5) Manual Local Import (all platforms)
 

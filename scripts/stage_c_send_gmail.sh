@@ -5,6 +5,7 @@ ROOT_DIR="/Users/yongkang/projects/skills/News-Summary"
 SENDER="$ROOT_DIR/.agents/skills/hot-news-daily-brief/scripts/send_summary_gmail_api.py"
 RENDERER="$ROOT_DIR/.agents/skills/hot-news-daily-brief/scripts/render_digest_html.py"
 VALIDATOR="$ROOT_DIR/.agents/skills/hot-news-daily-brief/scripts/validate_digest.py"
+SYNC_SOURCE_HEALTH="$ROOT_DIR/.agents/skills/hot-news-daily-brief/scripts/update_source_health_section.py"
 ENV_FILE="$ROOT_DIR/scripts/gmail.env"
 
 if [[ -f "$ENV_FILE" ]]; then
@@ -19,6 +20,8 @@ RECIPIENT="${NEWS_DIGEST_TO:-}"
 MAIL_CONTENT_MODE="${NEWS_DIGEST_MAIL_CONTENT_MODE:-multipart}"
 SKIP_VALIDATE="${NEWS_DIGEST_SKIP_VALIDATE:-0}"
 MIN_ENGLISH_WORDS="${NEWS_DIGEST_MIN_ENGLISH_WORDS:-200}"
+SYNC_SOURCE_HEALTH_FLAG="${NEWS_DIGEST_SYNC_SOURCE_HEALTH:-1}"
+CANDIDATE_JSON_PATH="${NEWS_DIGEST_CANDIDATE_FILE:-}"
 
 if [[ "$MAIL_CONTENT_MODE" != "plain" && "$MAIL_CONTENT_MODE" != "multipart" && "$MAIL_CONTENT_MODE" != "html-only" ]]; then
   echo "[ERROR] Unsupported NEWS_DIGEST_MAIL_CONTENT_MODE: $MAIL_CONTENT_MODE" >&2
@@ -34,6 +37,16 @@ fi
 if [[ ! -f "$REPORT_PATH" ]]; then
   echo "[ERROR] Report not found: $REPORT_PATH" >&2
   exit 1
+fi
+
+if [[ "$SYNC_SOURCE_HEALTH_FLAG" == "1" || "$SYNC_SOURCE_HEALTH_FLAG" == "true" || "$SYNC_SOURCE_HEALTH_FLAG" == "TRUE" ]]; then
+  SYNC_CMD=(python3 "$SYNC_SOURCE_HEALTH" --report "$REPORT_PATH" --inbox-dir "$ROOT_DIR/data/inbox")
+  if [[ -n "$CANDIDATE_JSON_PATH" ]]; then
+    SYNC_CMD+=(--candidate-json "$CANDIDATE_JSON_PATH")
+  fi
+  "${SYNC_CMD[@]}"
+else
+  echo "[WARN] Skip source-health sync because NEWS_DIGEST_SYNC_SOURCE_HEALTH=$SYNC_SOURCE_HEALTH_FLAG"
 fi
 
 if [[ "$SKIP_VALIDATE" == "1" || "$SKIP_VALIDATE" == "true" || "$SKIP_VALIDATE" == "TRUE" ]]; then
