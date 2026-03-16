@@ -22,6 +22,8 @@ Command:
 
 Expected output:
 - `./data/inbox/news_candidates_YYYYMMDDTHHMMSSZ.json`
+- `./data/archive/by_date_source/YYYY-MM-DD/<source_slug>.json`
+- `./data/archive/by_date_source_manifest.json`
 
 ## Stage B: Offline Digest (Codex Automation)
 
@@ -34,15 +36,17 @@ Prompt template:
 Use [$hot-news-daily-brief](/Users/yongkang/projects/skills/News-Summary/.agents/skills/hot-news-daily-brief/SKILL.md).
 Do not browse the internet.
 Read the latest ./data/inbox/news_candidates_*.json, keep last-24-hour items, score hotness, deduplicate events, and generate bilingual digest in this order:
-Top 5, 当日总体总结（约300字）, 数据源抓取与有效性（过去24小时）, [时政], [金融], [科技-AI], [科技-其他].
-Each story must include Why hot, English summary, 中文总结, English word count, Source URL, and absolute published time.
+Top 5, 当日总体总结（约300字）, [时政], [金融], [科技-AI], [科技-其他], optional [X 热点], and finally 数据源抓取与有效性（过去24小时）.
+Each story must include Why hot, English summary, 中文翻译, English word count, Source URL, and absolute published time.
 Hard constraints:
-1) Each story's English summary must be a single long-form paragraph with at least 200 English words.
+1) Each story's English summary must be long-form with at least 200 English words and should include quantitative evidence (numbers/percentages/prices/counts/time windows) where available in sources.
 2) If any story is under 200 words, expand it before finalizing.
-3) Keep 当日总体总结 around 300 Chinese characters.
-4) Add a source-health section from latest fetch_report, including successful sources and failed sources.
-5) Each category section should output Top3 stories whenever enough reliable candidates exist.
-6) Top 5 must use section champions: Top1 from each section + 1 wildcard next-best item.
+3) 中文翻译 must be paragraph-by-paragraph literal translation of English summary, preserving figures and uncertainty wording.
+4) Do not output 评论 unless explicitly requested.
+5) Keep 当日总体总结 around 300 Chinese characters.
+6) Add a source-health section from latest fetch_report, including successful sources and failed sources.
+7) Each category section should output Top3 stories whenever enough reliable candidates exist.
+8) Top 5 must use section champions: Top1 from each section + 1 wildcard next-best item.
 Write result to ./Report/YYYY-MM-DD.md and include full digest in inbox output.
 ```
 
@@ -60,6 +64,10 @@ Preferred Gmail API command:
 # export NEWS_DIGEST_MAIL_CONTENT_MODE="multipart"  # plain + HTML (recommended)
 # export NEWS_DIGEST_MAIL_CONTENT_MODE="plain"      # plain only
 # export NEWS_DIGEST_MAIL_CONTENT_MODE="html-only"  # HTML only
+# Weekly trend section (injected into Sunday report before source-health):
+# export NEWS_DIGEST_WEEKLY_TREND_ENABLED="1"
+# export NEWS_DIGEST_WEEKLY_TREND_WEEKDAY="7"
+# export NEWS_DIGEST_WEEKLY_TREND_WINDOWS="7,30,90,180,360"
 /bin/zsh /Users/yongkang/projects/skills/News-Summary/scripts/stage_c_send_gmail.sh
 ```
 
@@ -77,4 +85,15 @@ python3 .agents/skills/hot-news-daily-brief/scripts/send_summary_email.py \
 
 - 06:30 local time: Stage A (online collect)
 - 07:00 local time: Stage B (Codex offline summarize)
-- 07:05 local time: Stage C (optional email send, online)
+- 07:05 local time: Stage C (optional email send, online; Sunday run auto-includes weekly trend interpretation with concrete story examples)
+
+## Optional Stage D: Archive Analysis
+
+Generate cross-date trend reports from `./data/archive/by_date_source/`:
+
+```bash
+/usr/bin/python3 /Users/yongkang/projects/skills/News-Summary/.agents/skills/hot-news-daily-brief/scripts/analyze_archive.py \
+  --archive-root /Users/yongkang/projects/skills/News-Summary/data/archive/by_date_source \
+  --out-dir /Users/yongkang/projects/skills/News-Summary/Report/archive-analysis \
+  --windows 7,30,90,180,360
+```

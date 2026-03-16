@@ -28,6 +28,9 @@ Run this stage in an environment with internet access (local cron, cloud runner,
 
 2. Verify output:
    - A new file: `./data/inbox/news_candidates_YYYYMMDDTHHMMSSZ.json`
+   - Date/source archive files for cross-date analysis:
+     - `./data/archive/by_date_source/YYYY-MM-DD/<source_slug>.json`
+     - `./data/archive/by_date_source_manifest.json`
    - Keep `fetch_report` for source success/failure visibility.
 
 3. Optional manual source augmentation:
@@ -61,12 +64,12 @@ Run this stage in Codex automation even when internet is blocked.
 5. Produce final digest in this exact order:
    - `Top 5 Most Important`
    - `当日总体总结（约300字）`
-   - `数据源抓取与有效性（过去24小时）`
    - `[时政]`
    - `[金融]`
    - `[科技-AI]`
    - `[科技-其他]`
    - `[X 热点]`（可选：当 `source` 来自 X/Twitter 且有可靠候选时输出）
+   - `数据源抓取与有效性（过去24小时）`（放在最后）
 6. Save to:
    - `./Report/YYYY-MM-DD.md`
 
@@ -84,8 +87,9 @@ Ranking rules:
 For every output story, include:
 - `Title`
 - `Why hot` (one sentence)
-- `English summary` (single long-form paragraph, **at least 200 English words**)
-- `中文总结` (4-6 bullets, covering facts, context, impact, and uncertainty)
+- `English summary` (long-form, **at least 200 English words**, and must include quantitative evidence where available: numbers/percentages/prices/counts/time windows)
+- `中文翻译` (paragraph-by-paragraph literal translation of the English summary; do not add new claims or editorial comments)
+- `评论`（可选；默认关闭，仅在明确开启时输出）
 - `English word count` (explicit number, must be `>= 200`)
 - `Source URL` (1-3 links)
 - `Published time` (absolute date/time with timezone)
@@ -94,6 +98,8 @@ Quality gates:
 - Mark inference clearly when not directly supported by source facts.
 - Keep neutral tone.
 - Add a self-check before finalizing: if any story's English summary is under 200 words, expand it before output.
+- Add quantitative grounding in English summary: include concrete figures (for example percentages, market levels, casualty counts, timelines, funding/contract sizes) whenever source provides them.
+- `中文翻译` must keep paragraph alignment with English summary (逐段直译) and should preserve numbers, units, and uncertainty qualifiers.
 - Add `数据源抓取与有效性（过去24小时）` section based on `fetch_report` in latest candidate JSON:
   - list successful sources that entered filtering
   - list failed/unavailable sources for troubleshooting
@@ -116,21 +122,14 @@ Use this exact top-level layout:
 ## 当日总体总结（约300字）
 ...
 
-## 数据源抓取与有效性（过去24小时）
-- 数据窗口: ...
-### 成功抓取（本次进入候选池并参与筛选）
-- ...
-### 抓取失败或不可用（建议排查）
-- ...
-
 ## [时政]
 ### 1) Story title
 - Why hot: ...
 - English summary (>= 200 words):
   ...
-- 中文总结:
-  - ...
-  - ...
+- 中文翻译:
+  ...
+- 评论: (optional, only when explicitly enabled)
   - ...
   - ...
 - English word count: 2xx words
@@ -155,6 +154,13 @@ Use this exact top-level layout:
 
 ## [X 热点]
 ...
+
+## 数据源抓取与有效性（过去24小时）
+- 数据窗口: ...
+### 成功抓取（本次进入候选池并参与筛选）
+- ...
+### 抓取失败或不可用（建议排查）
+- ...
 ```
 
 Formatting rules:
@@ -163,9 +169,12 @@ Formatting rules:
 - Each section should provide Top3 stories when enough candidates exist; if fewer than 3 reliable items exist, explain with `无可信高热度新闻` for missing slots.
 - `[X 热点]` is optional; when present it should also provide Top3 and can cite both post URL and shared-link URLs.
 - Keep `当日总体总结` at around 300 Chinese characters.
+- Place `数据源抓取与有效性（过去24小时）` at the end of the report so primary news sections are read first.
 - `数据源抓取与有效性` must reflect actual `fetch_report` results from local candidate file.
 - Keep one story per heading.
 - `English summary` must be long-form and information-dense; do not compress into short bullets.
+- `English summary` should prefer evidence-backed writing over purely qualitative claims; include measurable facts when source data exists.
+- `中文翻译` should be close translation, not an extra summary.
 - Include absolute dates/times, not "today/yesterday".
 
 ## Optional Email Delivery
@@ -178,9 +187,12 @@ Preferred path: Gmail API OAuth (no SMTP dependency).
    - `NEWS_DIGEST_MAIL_CONTENT_MODE=plain` (plain text only)
    - `NEWS_DIGEST_MAIL_CONTENT_MODE=multipart` (plain + HTML, recommended)
    - `NEWS_DIGEST_MAIL_CONTENT_MODE=html-only` (HTML only)
+   - `NEWS_DIGEST_COMMENT_MODE=off|on` (`off` default; remove `评论` blocks before send)
+   - `NEWS_DIGEST_MIN_ENGLISH_NUMERIC_FACTS=N` (optional validator gate; default `0`, recommended `2`)
+   - Weekly trend injection (Sunday by default): `NEWS_DIGEST_WEEKLY_TREND_ENABLED=1`, `NEWS_DIGEST_WEEKLY_TREND_WEEKDAY=7`, `NEWS_DIGEST_WEEKLY_TREND_WINDOWS=7,30,90,180,360`
 4. Send report using stage script (auto-renders `./Report/YYYY-MM-DD.html` when needed):
    - `/bin/zsh /Users/yongkang/projects/skills/News-Summary/scripts/stage_c_send_gmail.sh`
-   - This script validates digest quality before sending (word count, overall summary, source health section).
+   - This script validates digest quality before sending (word count, optional numeric-evidence check, overall summary, source health section). On Sunday runs, it also appends a weekly trend interpretation section with concrete story examples before source-health.
 5. If Gmail API credentials are missing, optionally fall back to SMTP:
    - `python3 .agents/skills/hot-news-daily-brief/scripts/send_summary_email.py ...`
 
@@ -198,3 +210,5 @@ Preferred path: Gmail API OAuth (no SMTP dependency).
 - `scripts/send_summary_gmail_api.py`: Gmail API sender (OAuth refresh token).
 - `scripts/send_summary_email.py`: SMTP fallback sender.
 - `scripts/validate_digest.py`: pre-send quality gate validator.
+- `scripts/analyze_archive.py`: cross-window archive analytics (7/30/90/180/360 days) for source keywords, heat trends, and repeated event trajectories.
+- `scripts/append_weekly_trend_section.py`: inject weekly cross-window interpretation into Sunday digest, with concrete story links and trend commentary.

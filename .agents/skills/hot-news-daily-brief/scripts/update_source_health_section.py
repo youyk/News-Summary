@@ -118,23 +118,14 @@ def section_end(text: str, start_index: int) -> int:
 
 def replace_or_insert_section(text: str, section_markdown: str) -> str:
     section_match = re.search(r"^##\s+数据源抓取与有效性（过去24小时）\s*$", text, flags=re.MULTILINE)
+    body = text
     if section_match:
         start = section_match.start()
         end = section_end(text, start)
-        prefix = text[:start].rstrip() + "\n\n"
-        suffix = text[end:].lstrip("\n")
-        return prefix + section_markdown + "\n" + suffix
+        body = (text[:start] + text[end:]).strip() + "\n"
 
-    # If section missing, insert before the first category block.
-    cat_match = re.search(r"^##\s+\[(时政|金融|科技-AI|科技-其他)\]\s*$", text, flags=re.MULTILINE)
-    if cat_match:
-        idx = cat_match.start()
-        prefix = text[:idx].rstrip() + "\n\n"
-        suffix = text[idx:].lstrip("\n")
-        return prefix + section_markdown + "\n" + suffix
-
-    # Fallback: append to the end.
-    return text.rstrip() + "\n\n" + section_markdown + "\n"
+    # Always append source-health section at the end to keep primary news sections first.
+    return body.rstrip() + "\n\n" + section_markdown + "\n"
 
 
 def main() -> int:

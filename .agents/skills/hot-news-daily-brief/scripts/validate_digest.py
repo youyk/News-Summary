@@ -4,8 +4,9 @@ Validate markdown digest quality gates before sending email.
 
 Checks:
 1) Each story has an English summary with a minimum word count.
-2) Daily overall summary exists and is around target Chinese-character length.
-3) Source health section exists and contains success/failure subsections.
+2) (Optional) Each English summary includes minimum numeric evidence items.
+3) Daily overall summary exists and is around target Chinese-character length.
+4) Source health section exists and contains success/failure subsections.
 """
 
 from __future__ import annotations
@@ -29,6 +30,20 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=200,
         help="Minimum English words required for each story summary (default: 200)",
+    )
+    parser.add_argument(
+        "--min-english-numeric-facts",
+        type=int,
+        default=0,
+        help=(
+            "Minimum numeric facts required in each English summary (default: 0, disabled). "
+            "Examples counted: 100, 3.2%, $20B, 24-hour."
+        ),
+    )
+    parser.add_argument(
+        "--require-comment",
+        action="store_true",
+        help="Require '- 评论:' block for each story",
     )
     parser.add_argument(
         "--overall-cn-min",
@@ -97,7 +112,7 @@ def extract_english_summary_block(story_block: str) -> str:
         collected.append(first_line_payload)
 
     stop_pattern = re.compile(
-        r"^\s*-\s*(中文总结|Source URL|Published time|English word count|Why hot)\b",
+        r"^\s*-\s*(中文翻译|评论|中文总结|Source URL|Published time|English word count|Why hot)\b",
         flags=re.IGNORECASE,
     )
 
@@ -116,6 +131,15 @@ def extract_english_summary_block(story_block: str) -> str:
 def count_english_words(text: str) -> int:
     words = re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", text)
     return len(words)
+
+
+def count_numeric_facts(text: str) -> int:
+    # Count common quantitative expressions: numbers, percentages, and money-scale suffixes.
+    pattern = re.compile(
+        r"\b(?:\$)?\d+(?:[.,]\d+)?(?:%|bn|mn|m|k|b|million|billion|trillion)?\b",
+        flags=re.IGNORECASE,
+    )
+    return len(pattern.findall(text))
 
 
 def count_chinese_chars(text: str) -> int:
@@ -156,7 +180,12 @@ def validate_source_health(full_text: str, errors: list[str]) -> None:
 
 
 def validate_story_english_words(
-    full_text: str, min_words: int, errors: list[str], info: list[str]
+    full_text: str,
+    min_words: int,
+    min_numeric_facts: int,
+    require_comment: bool,
+    errors: list[str],
+    info: list[str],
 ) -> None:
     story_count = 0
     checked_count = 0
@@ -189,6 +218,29 @@ def validate_story_english_words(
                 errors.append(
                     f"[{section}] {title}: English summary too short ({words} < {min_words})"
                 )
+            if min_numeric_facts > 0:
+                numeric_facts = count_numeric_facts(summary)
+                info.append(f"[{section}] {title}: English numeric facts={numeric_facts}")
+                if numeric_facts < min_numeric_facts:
+                    errors.append(
+                        f"[{section}] {title}: English summary lacks numeric evidence "
+                        f"({numeric_facts} < {min_numeric_facts})"
+                    )
+
+            # Preferred bilingual layout:
+            # - 中文翻译: (required)
+            # - 评论: (optional by flag; backward-compatible with legacy `中文总结`)
+            has_translation = bool(
+                re.search(r"^\s*-\s*中文翻译\s*:", block, flags=re.MULTILINE)
+            )
+            has_comment = bool(re.search(r"^\s*-\s*评论\s*:", block, flags=re.MULTILINE))
+            has_legacy_cn = bool(
+                re.search(r"^\s*-\s*中文总结\s*:", block, flags=re.MULTILINE)
+            )
+            if not has_translation:
+                errors.append(f"[{section}] {title}: missing 中文翻译 block")
+            if require_comment and not has_comment and not has_legacy_cn:
+                errors.append(f"[{section}] {title}: missing 评论 block")
 
     if story_count == 0:
         errors.append("No story blocks found under category sections.")
@@ -251,6 +303,8 @@ def main() -> int:
     validate_story_english_words(
         full_text=text,
         min_words=args.min_english_words,
+        min_numeric_facts=args.min_english_numeric_facts,
+        require_comment=args.require_comment,
         errors=errors,
         info=info,
     )

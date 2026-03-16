@@ -336,6 +336,19 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional ISO timestamp override in UTC (for deterministic tests)",
     )
+    parser.add_argument(
+        "--archive-dir",
+        default="",
+        help=(
+            "Optional archive directory for date/source grouped files. "
+            "Default: sibling 'archive' directory next to --out-dir."
+        ),
+    )
+    parser.add_argument(
+        "--disable-date-source-archive",
+        action="store_true",
+        help="Disable writing date/source grouped archive JSON files",
+    )
     return parser.parse_args()
 
 
@@ -1296,6 +1309,128 @@ def deduplicate(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
+def source_slug(value: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9]+", "_", value.strip().lower())
+    cleaned = cleaned.strip("_")
+    return cleaned or "unknown_source"
+
+
+def item_identity(item: dict[str, Any]) -> str:
+    item_id = str(item.get("id", "")).strip()
+    if item_id:
+        return item_id
+    return stable_id(
+        str(item.get("source", "")),
+        str(item.get("url", "")),
+        str(item.get("title", "")),
+    )
+
+
+def item_sort_tuple(item: dict[str, Any]) -> tuple[dt.datetime, str]:
+    published = parse_dt(str(item.get("published_at", "")))
+    fetched = parse_dt(str(item.get("fetched_at", "")))
+    ts = published or fetched or dt.datetime.fromtimestamp(0, tz=dt.timezone.utc)
+    title = str(item.get("title", "")).strip().lower()
+    return ts, title
+
+
+def load_existing_archive_items(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    if isinstance(payload, dict) and isinstance(payload.get("items"), list):
+        return [row for row in payload["items"] if isinstance(row, dict)]
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    return []
+
+
+def archive_by_date_source(
+    *,
+    items: list[dict[str, Any]],
+    archive_dir: Path,
+    now: dt.datetime,
+    candidate_filename: str,
+) -> dict[str, Any]:
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for item in items:
+        source = str(item.get("source", "")).strip() or "Unknown"
+        published = parse_dt(str(item.get("published_at", "")))
+        fetched = parse_dt(str(item.get("fetched_at", "")))
+        date_key = (published or fetched or now).date().isoformat()
+        grouped.setdefault((date_key, source), []).append(item)
+
+    by_date_source_dir = archive_dir / "by_date_source"
+    by_date_source_dir.mkdir(parents=True, exist_ok=True)
+
+    groups_written = 0
+    manifest_rows: list[dict[str, Any]] = []
+
+    for (date_key, source), group_items in sorted(grouped.items()):
+        date_dir = by_date_source_dir / date_key
+        date_dir.mkdir(parents=True, exist_ok=True)
+
+        slug = source_slug(source)
+        group_path = date_dir / f"{slug}.json"
+
+        merged_by_id: dict[str, dict[str, Any]] = {}
+        for row in load_existing_archive_items(group_path):
+            merged_by_id[item_identity(row)] = row
+        for row in group_items:
+            merged_by_id[item_identity(row)] = row
+
+        merged_items = list(merged_by_id.values())
+        merged_items.sort(key=item_sort_tuple, reverse=True)
+
+        group_payload = {
+            "schema_version": "1.0",
+            "updated_at": now.isoformat(),
+            "date": date_key,
+            "source": source,
+            "source_slug": slug,
+            "from_candidate_file": candidate_filename,
+            "total_items": len(merged_items),
+            "items": merged_items,
+        }
+        group_path.write_text(
+            json.dumps(group_payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        groups_written += 1
+
+        manifest_rows.append(
+            {
+                "date": date_key,
+                "source": source,
+                "source_slug": slug,
+                "path": str(group_path),
+                "total_items": len(merged_items),
+            }
+        )
+
+    manifest_path = archive_dir / "by_date_source_manifest.json"
+    manifest_payload = {
+        "schema_version": "1.0",
+        "updated_at": now.isoformat(),
+        "from_candidate_file": candidate_filename,
+        "group_count": len(manifest_rows),
+        "groups": manifest_rows,
+    }
+    manifest_path.write_text(
+        json.dumps(manifest_payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    return {
+        "archive_dir": str(archive_dir),
+        "groups_written": groups_written,
+        "manifest_path": str(manifest_path),
+    }
+
+
 def status_is_ok(status: Any) -> bool:
     return str(status).strip().lower().startswith("ok")
 
@@ -1491,9 +1626,19 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     filename = f"news_candidates_{now.strftime('%Y%m%dT%H%M%SZ')}.json"
     out_path = out_dir / filename
+    archive_summary: dict[str, Any] | None = None
 
     ok_sources = sum(1 for item in fetch_reports if status_is_ok(item.get("status")))
     failed_sources = sum(1 for item in fetch_reports if not status_is_ok(item.get("status")))
+
+    if not args.disable_date_source_archive:
+        archive_dir = Path(args.archive_dir.strip()) if args.archive_dir.strip() else out_dir.parent / "archive"
+        archive_summary = archive_by_date_source(
+            items=deduped,
+            archive_dir=archive_dir,
+            now=now,
+            candidate_filename=filename,
+        )
 
     payload = {
         "schema_version": "1.0",
@@ -1510,6 +1655,8 @@ def main() -> int:
         "fetch_report": fetch_reports,
         "items": deduped,
     }
+    if archive_summary:
+        payload["archive"] = archive_summary
 
     out_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
@@ -1521,6 +1668,12 @@ def main() -> int:
         f"[OK] Items: {len(deduped)} (before dedup: {len(items)}), "
         f"sources ok={ok_sources}, failed={failed_sources}"
     )
+    if archive_summary:
+        print(
+            "[OK] Date/source archive updated: "
+            f"groups={archive_summary['groups_written']}, "
+            f"manifest={archive_summary['manifest_path']}"
+        )
     if failed_sources:
         print("[WARN] Some sources failed. Check fetch_report in output JSON.")
     return 0

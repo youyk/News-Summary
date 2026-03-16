@@ -21,7 +21,12 @@
 /data/inbox/news_candidates_*.json
 /data/inbox/manual/*.json
 /data/inbox/manual/*.json.disabled
+/data/archive/**
 
 # Local editor/system noise
 .DS_Store
 *.swp
+
+/Report/archive-analysis/**
+/.cache/**
+/data/inbox/manual/*.disabled
